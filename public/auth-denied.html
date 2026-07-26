@@ -73,6 +73,8 @@
 
     const portalUrl = isLocal
       ? 'http://portal.localtest.me:5173'
+      : window.location.hostname.endsWith('.sakura3.my.id')
+      ? 'https://portal.sakura3.my.id'
       : window.location.hostname.endsWith('.sakura3.id')
       ? 'https://portal.sakura3.id'
       : 'https://portal.veryresto.com';

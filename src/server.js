@@ -86,6 +86,7 @@ app.post('/api/logout', async (req, res) => {
 
     const hostname = req.hostname;
     const domain = hostname.endsWith('.localtest.me') ? '.localtest.me' :
+        hostname.endsWith('.sakura3.my.id') ? '.sakura3.my.id' :
         hostname.endsWith('.sakura3.id') ? '.sakura3.id' : hostname;
 
     res.clearCookie('sakura3-auth', { domain: domain, path: '/' });

@@ -8,7 +8,8 @@ const PORTAL_URL = process.env.PORTAL_URL || 'https://portal.veryresto.com';
 const ALLOWED_RETURN_ORIGINS = [
     'http://rekap.localtest.me:3000',
     'https://rekap.veryresto.com',
-    'https://rekap.sakura3.id'
+    'https://rekap.sakura3.id',
+    'https://rekap.sakura3.my.id'
 ];
 
 let supabase = null;
@@ -229,7 +230,9 @@ function buildPortalRedirectUrl(currentUrl) {
         let portal = process.env.PORTAL_URL;
         if (!portal) {
             const host = urlObj.hostname;
-            if (host.endsWith('.sakura3.id')) {
+            if (host.endsWith('.sakura3.my.id')) {
+                portal = 'https://portal.sakura3.my.id';
+            } else if (host.endsWith('.sakura3.id')) {
                 portal = 'https://portal.sakura3.id';
             } else if (host.endsWith('.localtest.me')) {
                 portal = 'http://portal.localtest.me:5173';
