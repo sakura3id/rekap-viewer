@@ -227,18 +227,16 @@ function buildPortalRedirectUrl(currentUrl) {
         }
 
         const encodedUrl = encodeURIComponent(currentUrl);
-        let portal = process.env.PORTAL_URL;
-        if (!portal) {
-            const host = urlObj.hostname;
-            if (host.endsWith('.sr3.my.id')) {
-                portal = 'https://portal.sr3.my.id';
-            } else if (host.endsWith('.sakura3.id')) {
-                portal = 'https://portal.sakura3.id';
-            } else if (host.endsWith('.localtest.me')) {
-                portal = 'http://portal.localtest.me:5173';
-            } else {
-                portal = 'https://portal.veryresto.com';
-            }
+        let portal = null;
+        const host = urlObj.hostname;
+        if (host.endsWith('.sr3.my.id')) {
+            portal = 'https://portal.sr3.my.id';
+        } else if (host.endsWith('.sakura3.id')) {
+            portal = 'https://portal.sakura3.id';
+        } else if (host.endsWith('.localtest.me')) {
+            portal = 'http://portal.localtest.me:5173';
+        } else {
+            portal = process.env.PORTAL_URL || 'https://portal.veryresto.com';
         }
         return `${portal}/?redirect_to=${encodedUrl}`;
     } catch (e) {
