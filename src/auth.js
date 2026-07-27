@@ -9,7 +9,7 @@ const ALLOWED_RETURN_ORIGINS = [
     'http://rekap.localtest.me:3000',
     'https://rekap.veryresto.com',
     'https://rekap.sakura3.id',
-    'https://rekap.sakura3.my.id'
+    'https://rekap.sr3.my.id'
 ];
 
 let supabase = null;
@@ -230,8 +230,8 @@ function buildPortalRedirectUrl(currentUrl) {
         let portal = process.env.PORTAL_URL;
         if (!portal) {
             const host = urlObj.hostname;
-            if (host.endsWith('.sakura3.my.id')) {
-                portal = 'https://portal.sakura3.my.id';
+            if (host.endsWith('.sr3.my.id')) {
+                portal = 'https://portal.sr3.my.id';
             } else if (host.endsWith('.sakura3.id')) {
                 portal = 'https://portal.sakura3.id';
             } else if (host.endsWith('.localtest.me')) {

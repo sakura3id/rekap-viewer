@@ -55,8 +55,8 @@ function handleAuthFailure(req, res) {
         let portal = process.env.PORTAL_URL;
         if (!portal) {
             const host = req.get('host') || '';
-            if (host.endsWith('.sakura3.my.id')) {
-                portal = 'https://portal.sakura3.my.id';
+            if (host.endsWith('.sr3.my.id')) {
+                portal = 'https://portal.sr3.my.id';
             } else if (host.endsWith('.sakura3.id')) {
                 portal = 'https://portal.sakura3.id';
             } else if (host.endsWith('.localtest.me')) {
