@@ -1,7 +1,7 @@
-const { 
-    extractSessionFromCookieHeader, 
-    verifyJwt, 
-    fetchApprovalStatus, 
+const {
+    extractSessionFromCookieHeader,
+    verifyJwt,
+    fetchApprovalStatus,
     buildPortalRedirectUrl,
     fetchUserProfile,
     checkNamespacedPermission
@@ -24,16 +24,16 @@ async function requireAuth(req, res, next) {
 
     const cookieHeader = req.headers.cookie;
     const session = extractSessionFromCookieHeader(cookieHeader);
-    
+
     if (!session || !session.access_token) {
         return handleAuthFailure(req, res);
     }
-    
+
     const user = await verifyJwt(session.access_token);
     if (!user) {
         return handleAuthFailure(req, res);
     }
-    
+
     req.user = user;
     req.accessToken = session.access_token;
     next();
@@ -41,15 +41,15 @@ async function requireAuth(req, res, next) {
 
 function handleAuthFailure(req, res) {
     const isApiRequest = req.path.startsWith('/api/');
-    
+
     if (isApiRequest) {
         return res.status(401).json({ error: 'Authentication required' });
     }
-    
+
     // Must use req.originalUrl to preserve query strings.
     const currentUrl = req.protocol + '://' + req.get('host') + req.originalUrl;
     const redirectUrl = buildPortalRedirectUrl(currentUrl);
-    
+
     if (!redirectUrl) {
         // Fallback to portal root if origin isn't allowed (auth failure)
         let portal = process.env.PORTAL_URL;
@@ -67,7 +67,7 @@ function handleAuthFailure(req, res) {
         }
         return res.redirect(portal);
     }
-    
+
     res.redirect(redirectUrl);
 }
 
@@ -86,18 +86,18 @@ async function requireApprovedResident(req, res, next) {
     if (!req.user) {
         return handleAuthFailure(req, res);
     }
-    
+
     // 1. Fetch the user profile (status and classification)
     const profile = await fetchUserProfile(req.accessToken, req.user.id);
     const status = profile?.approval_status || null;
-    
+
     console.log('[AUTH]', {
         userId: req.user.id,
         authResult: 'success', // At this stage, JWT verification has succeeded
         approvalStatus: status,
         route: req.originalUrl
     });
-    
+
     if (status !== 'approved') {
         const isApiRequest = req.path.startsWith('/api/');
         if (isApiRequest) {
@@ -106,7 +106,7 @@ async function requireApprovedResident(req, res, next) {
         res.set('Cache-Control', 'no-store');
         return res.redirect(`/auth-denied?reason=${status || 'unknown'}`);
     }
-    
+
     // 2. CheckNamespacedPermission for 'rekap_viewer.read_data'
     const hasPermission = await checkNamespacedPermission(req.accessToken, req.user.id, 'rekap_viewer.read_data');
     if (!hasPermission) {
@@ -118,7 +118,7 @@ async function requireApprovedResident(req, res, next) {
         res.set('Cache-Control', 'no-store');
         return res.redirect('/auth-denied?reason=unauthorized_role');
     }
-    
+
     next();
 }
 

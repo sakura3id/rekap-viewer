@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -19,6 +20,7 @@
       text-align: center;
       padding: 20px;
     }
+
     .denied-card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -27,15 +29,18 @@
       max-width: 400px;
       box-shadow: var(--shadow);
     }
+
     h2 {
       margin-top: 0;
       color: var(--text);
     }
+
     p {
       color: var(--text-muted);
       line-height: 1.5;
       margin-bottom: 24px;
     }
+
     .btn {
       display: inline-block;
       background: var(--accent);
@@ -46,26 +51,29 @@
       font-weight: 500;
       transition: opacity 0.2s;
     }
+
     .btn:hover {
       opacity: 0.9;
     }
   </style>
 </head>
+
 <body>
 
   <div class="denied-card">
     <h2 id="title">Akses Ditolak</h2>
     <p id="message">Memuat informasi...</p>
-    <a href="https://portal.veryresto.com" id="back-to-portal" class="btn" target="_blank" rel="noopener noreferrer">Kembali ke Portal</a>
+    <a href="https://portal.veryresto.com" id="back-to-portal" class="btn" target="_blank"
+      rel="noopener noreferrer">Kembali ke Portal</a>
   </div>
 
   <script>
     const params = new URLSearchParams(window.location.search);
     const reason = params.get('reason');
-    
+
     const titleEl = document.getElementById('title');
     const msgEl = document.getElementById('message');
-    
+
     // Determine the portal URL based on the environment
     const isLocal = window.location.hostname.endsWith('.localtest.me') ||
       window.location.hostname.endsWith('.lvh.me') ||
@@ -74,29 +82,30 @@
     const portalUrl = isLocal
       ? 'http://portal.localtest.me:5173'
       : window.location.hostname.endsWith('.sakura3.my.id')
-      ? 'https://portal.sakura3.my.id'
-      : window.location.hostname.endsWith('.sakura3.id')
-      ? 'https://portal.sakura3.id'
-      : 'https://portal.veryresto.com';
+        ? 'https://portal.sakura3.my.id'
+        : window.location.hostname.endsWith('.sakura3.id')
+          ? 'https://portal.sakura3.id'
+          : 'https://portal.veryresto.com';
 
     document.getElementById('back-to-portal').href = portalUrl;
-    
+
     if (reason === 'pending') {
-        titleEl.textContent = 'Menunggu Persetujuan';
-        msgEl.textContent = 'Anda telah berhasil masuk, tetapi akun Anda masih menunggu persetujuan admin. Anda akan diberi tahu setelah akses diberikan.';
+      titleEl.textContent = 'Menunggu Persetujuan';
+      msgEl.textContent = 'Anda telah berhasil masuk, tetapi akun Anda masih menunggu persetujuan admin. Anda akan diberi tahu setelah akses diberikan.';
     } else if (reason === 'rejected') {
-        titleEl.textContent = 'Akses Ditolak';
-        msgEl.textContent = 'Pendaftaran akun Anda tidak disetujui. Silakan hubungi admin komunitas jika menurut Anda ini adalah kesalahan.';
+      titleEl.textContent = 'Akses Ditolak';
+      msgEl.textContent = 'Pendaftaran akun Anda tidak disetujui. Silakan hubungi admin komunitas jika menurut Anda ini adalah kesalahan.';
     } else if (reason === 'suspended') {
-        titleEl.textContent = 'Akun Ditangguhkan';
-        msgEl.textContent = 'Akun Anda telah ditangguhkan. Silakan hubungi admin komunitas.';
+      titleEl.textContent = 'Akun Ditangguhkan';
+      msgEl.textContent = 'Akun Anda telah ditangguhkan. Silakan hubungi admin komunitas.';
     } else if (reason === 'unauthorized_role') {
-        titleEl.textContent = 'Izin Tidak Memadai';
-        msgEl.textContent = 'Akun Anda telah disetujui, tetapi Anda belum memiliki peran (role) yang diperlukan untuk mengakses Rekap IPL. Silakan hubungi admin komunitas.';
+      titleEl.textContent = 'Izin Tidak Memadai';
+      msgEl.textContent = 'Akun Anda telah disetujui, tetapi Anda belum memiliki peran (role) yang diperlukan untuk mengakses Rekap IPL. Silakan hubungi admin komunitas.';
     } else {
-        titleEl.textContent = 'Akses Ditolak';
-        msgEl.textContent = 'Anda tidak memiliki izin untuk melihat halaman ini.';
+      titleEl.textContent = 'Akses Ditolak';
+      msgEl.textContent = 'Anda tidak memiliki izin untuk melihat halaman ini.';
     }
   </script>
 </body>
+
 </html>
