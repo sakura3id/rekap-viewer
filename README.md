@@ -25,10 +25,15 @@ A secure, high-performance web application to visualize IPL (Iuran Pemeliharaan 
 
 ---
 
-## Live Demo
+## Environments & Domains
 
-- **Fly Domain**: [rekap-viewer.fly.dev](https://rekap-viewer.fly.dev/)
-- **Custom Domain**: [rekap.veryresto.com](https://rekap.veryresto.com/)
+The platform supports local development, staging, and production environments across the following domains:
+
+| Environment | Base Domain | Portal URL | Rekap Viewer URL |
+| :--- | :--- | :--- | :--- |
+| **Local Development** | `*.localtest.me` | `http://portal.localtest.me:5173` | `http://rekap.localtest.me:3000` |
+| **Staging** | `*.sr3.my.id` | `https://portal.sr3.my.id` | `https://rekap.sr3.my.id` |
+| **Production** | `*.sakura3.id` | `https://portal.sakura3.id` | `https://rekap.sakura3.id` |
 
 ---
 
@@ -100,23 +105,19 @@ To validate the architecture, I benchmarked the app from multiple locations usin
 
 ## 🚀 Deployment (Fly.io)
 
-This project is optimized for deployment on **Fly.io** using Docker.
+This project is deployed to **Fly.io** using Docker.
 
-### 1. Launch App
+### Staging Deployment (`rekap.sr3.my.id`)
 ```bash
-fly launch
+npm run deploy:staging
 ```
+Config: [`fly.toml`](./fly.toml) — app name `rekap-viewer`.
 
-### 2. Set Secrets
-Ensure your sensitive credentials are set as Fly secrets:
+### Production Deployment (`rekap.sakura3.id`)
 ```bash
-fly secrets set GOOGLE_API_KEY=AIza... SHEET_ID=1xWE...
+npm run deploy:prod
 ```
-
-### 3. Deploy
-```bash
-fly deploy
-```
+Config: [`fly.production.toml`](./fly.production.toml) — app name `rekap-viewer-prod`.
 
 ---
 
