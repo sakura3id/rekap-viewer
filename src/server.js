@@ -19,6 +19,14 @@ const SHEET_ID = process.env.SHEET_ID;
 const RANGE = process.env.RANGE || 'Import!A1:ZZ550';
 const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
+// Middleware for migration redirects
+app.use((req, res, next) => {
+    if (req.hostname === 'rekap.veryresto.com') {
+        return res.redirect(301, `https://rekap.sr3.my.id${req.originalUrl}`);
+    }
+    next();
+});
+
 // Middleware for logging
 app.use((req, res, next) => {
     const start = Date.now();
