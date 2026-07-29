@@ -221,7 +221,8 @@ app.listen(PORT, HOST, async () => {
     console.log(`--------------------------------------------------`);
     console.log(`Rekap Viewer Backend (Cached) is running!`);
     console.log(`Region: ${process.env.FLY_REGION || 'local'}`);
-    console.log(`Local: http://localhost:${PORT}`);
+    console.log(`Local:  http://localhost:${PORT}`);
+    console.log(`Domain: http://rekap.localtest.me:${PORT}`);
     console.log(`--------------------------------------------------`);
 
     // Initial refresh on startup
