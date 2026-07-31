@@ -9,6 +9,12 @@ const {
 
 const DEV_BYPASS_AUTH = process.env.DEV_BYPASS_AUTH === 'true';
 
+// CRITICAL: Refuse to start if bypass is enabled in production
+if (DEV_BYPASS_AUTH && process.env.NODE_ENV === 'production') {
+    console.error('FATAL: DEV_BYPASS_AUTH is enabled in production. Refusing to start.');
+    process.exit(1);
+}
+
 /**
  * Step 1 — Authentication gate.
  * Reads and verifies the veryresto-auth cookie.

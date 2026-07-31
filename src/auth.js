@@ -1,8 +1,13 @@
 const { createClient } = require('@supabase/supabase-js');
-global.WebSocket = require('ws');
+const { LRUCache } = require('lru-cache');
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const PORTAL_URL = process.env.PORTAL_URL || 'https://portal.veryresto.com';
+
+// ── CONFIGURATION ────────────────────────────────────────────────────────
+const AUTH_CACHE_TTL_MS = 45_000; // 45 seconds
+const AUTH_CACHE_MAX_ENTRIES = 500; // Max entries per cache (prevents OOM)
 
 // Redirect Allowlist Validation
 const ALLOWED_RETURN_ORIGINS = [
@@ -12,70 +17,61 @@ const ALLOWED_RETURN_ORIGINS = [
     'https://rekap.sr3.my.id'
 ];
 
-let supabase = null;
+// ── SUPABASE CLIENTS (singleton, no per-request creation) ────────────────
+let serviceClient = null;
+let userClientCache = null;
 
-// Multi-level in-process cache with TTL for auth performance and rate limit prevention
-const jwtCache = new Map();
-const approvalCache = new Map();
-const committeeCache = new Map();
-const permissionCache = new Map();
-const profileCache = new Map();
-const rolesCache = new Map();
-const CACHE_TTL_MS = 45 * 1000; // 45 seconds
-
-// Periodically clean up expired cache entries to prevent memory growth
-const cleanupTimer = setInterval(() => {
-    const now = Date.now();
-    for (const [key, val] of jwtCache.entries()) {
-        if (now >= val.expiresAt) {
-            jwtCache.delete(key);
-        }
-    }
-    for (const [key, val] of approvalCache.entries()) {
-        if (now >= val.expiresAt) {
-            approvalCache.delete(key);
-        }
-    }
-    for (const [key, val] of committeeCache.entries()) {
-        if (now >= val.expiresAt) {
-            committeeCache.delete(key);
-        }
-    }
-    for (const [key, val] of permissionCache.entries()) {
-        if (now >= val.expiresAt) {
-            permissionCache.delete(key);
-        }
-    }
-    for (const [key, val] of profileCache.entries()) {
-        if (now >= val.expiresAt) {
-            profileCache.delete(key);
-        }
-    }
-    for (const [key, val] of rolesCache.entries()) {
-        if (now >= val.expiresAt) {
-            rolesCache.delete(key);
-        }
-    }
-}, 10 * 60 * 1000); // every 10 minutes
-
-if (typeof cleanupTimer.unref === 'function') {
-    cleanupTimer.unref();
-}
-
-function getSupabase() {
-    if (!supabase) {
+function getServiceClient() {
+    if (!serviceClient) {
         if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
             throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY are required');
         }
-        supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        serviceClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
             auth: { persistSession: false },
-            realtime: { transport: require('ws') }
+            realtime: { enabled: false }
         });
     }
-    return supabase;
+    return serviceClient;
 }
 
-// Parse the veryresto-auth cookie value from a raw cookie header string.
+// Cache user-scoped clients (keyed by accessToken) to avoid re-creation per request.
+// Short TTL since tokens rotate.
+function getSupabaseUserClient(accessToken) {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+        throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY are required');
+    }
+
+    if (!userClientCache) {
+        userClientCache = new LRUCache({ max: 50, ttl: AUTH_CACHE_TTL_MS });
+    }
+
+    const cached = userClientCache.get(accessToken);
+    if (cached) return cached;
+
+    const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: { persistSession: false },
+        global: {
+            headers: {
+                Authorization: `Bearer ${accessToken}`
+            }
+        },
+        realtime: { enabled: false }
+    });
+
+    userClientCache.set(accessToken, client);
+    return client;
+}
+
+// ── LRU CACHES (bounded size + TTL, no manual cleanup needed) ────────────
+const jwtCache = new LRUCache({ max: AUTH_CACHE_MAX_ENTRIES, ttl: AUTH_CACHE_TTL_MS });
+const approvalCache = new LRUCache({ max: AUTH_CACHE_MAX_ENTRIES, ttl: AUTH_CACHE_TTL_MS });
+const committeeCache = new LRUCache({ max: AUTH_CACHE_MAX_ENTRIES, ttl: AUTH_CACHE_TTL_MS });
+const permissionCache = new LRUCache({ max: AUTH_CACHE_MAX_ENTRIES, ttl: AUTH_CACHE_TTL_MS });
+const profileCache = new LRUCache({ max: AUTH_CACHE_MAX_ENTRIES, ttl: AUTH_CACHE_TTL_MS });
+const rolesCache = new LRUCache({ max: AUTH_CACHE_MAX_ENTRIES, ttl: AUTH_CACHE_TTL_MS });
+
+// ── COOKIE PARSING ───────────────────────────────────────────────────────
+// Parse the sakura3-auth cookie value from a raw cookie header string.
 // Returns { access_token, refresh_token } or null.
 function extractSessionFromCookieHeader(cookieHeader) {
     if (!cookieHeader) return null;
@@ -86,7 +82,10 @@ function extractSessionFromCookieHeader(cookieHeader) {
     if (!authCookie) return null;
 
     try {
-        const cookieValue = authCookie.split('=')[1];
+        // Use indexOf to handle base64 '=' characters in token values
+        const eqIndex = authCookie.indexOf('=');
+        if (eqIndex === -1) return null;
+        const cookieValue = authCookie.substring(eqIndex + 1);
         const decoded = decodeURIComponent(cookieValue);
         const parsed = JSON.parse(decoded);
         return parsed;
@@ -96,28 +95,23 @@ function extractSessionFromCookieHeader(cookieHeader) {
     }
 }
 
+// ── JWT VERIFICATION ─────────────────────────────────────────────────────
 // Verify a JWT with Supabase Auth. Returns the user object or null.
 async function verifyJwt(accessToken) {
     if (!accessToken) return null;
 
     const cached = jwtCache.get(accessToken);
-    if (cached && Date.now() < cached.expiresAt) {
-        return cached.user;
-    }
+    if (cached) return cached;
 
     try {
-        const client = getSupabase();
+        const client = getServiceClient();
         const { data, error } = await client.auth.getUser(accessToken);
 
         if (error || !data?.user) {
             return null;
         }
 
-        jwtCache.set(accessToken, {
-            user: data.user,
-            expiresAt: Date.now() + CACHE_TTL_MS
-        });
-
+        jwtCache.set(accessToken, data.user);
         return data.user;
     } catch (e) {
         console.error('Error verifying JWT:', e.message);
@@ -125,18 +119,17 @@ async function verifyJwt(accessToken) {
     }
 }
 
+// ── APPROVAL STATUS ──────────────────────────────────────────────────────
 // Query profiles.approval_status for a given user ID.
 // Returns 'approved' | 'rejected' | 'suspended' | 'pending' | null.
 async function fetchApprovalStatus(userId) {
     if (!userId) return null;
 
     const cached = approvalCache.get(userId);
-    if (cached && Date.now() < cached.expiresAt) {
-        return cached.status;
-    }
+    if (cached) return cached;
 
     try {
-        const client = getSupabase();
+        const client = getServiceClient();
         const { data, error } = await client
             .from('profiles')
             .select('approval_status')
@@ -150,10 +143,7 @@ async function fetchApprovalStatus(userId) {
 
         const status = data?.approval_status || null;
         if (status) {
-            approvalCache.set(userId, {
-                status: status,
-                expiresAt: Date.now() + CACHE_TTL_MS
-            });
+            approvalCache.set(userId, status);
         }
 
         return status;
@@ -163,23 +153,8 @@ async function fetchApprovalStatus(userId) {
     }
 }
 
-// Scopes Supabase queries with the user's JWT to resolve RLS properly
-function getSupabaseUserClient(accessToken) {
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-        throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY are required');
-    }
-    return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-        auth: { persistSession: false },
-        global: {
-            headers: {
-                Authorization: `Bearer ${accessToken}`
-            }
-        },
-        realtime: { transport: require('ws') }
-    });
-}
-
-// Query profiles.is_platform_manager for a given user ID.
+// ── COMMITTEE CHECK ──────────────────────────────────────────────────────
+// Query is_platform_manager RPC for a given user ID.
 // Returns true if the user is an admin or resident_verifier, false otherwise.
 async function fetchIsCommittee(accessToken, userId) {
     if (!userId || !accessToken) return false;
@@ -189,9 +164,7 @@ async function fetchIsCommittee(accessToken, userId) {
     }
 
     const cached = committeeCache.get(userId);
-    if (cached && Date.now() < cached.expiresAt) {
-        return cached.isCommittee;
-    }
+    if (cached !== undefined) return cached;
 
     try {
         const client = getSupabaseUserClient(accessToken);
@@ -203,10 +176,7 @@ async function fetchIsCommittee(accessToken, userId) {
         }
 
         const isCommittee = data === true;
-        committeeCache.set(userId, {
-            isCommittee,
-            expiresAt: Date.now() + CACHE_TTL_MS
-        });
+        committeeCache.set(userId, isCommittee);
 
         return isCommittee;
     } catch (e) {
@@ -215,6 +185,7 @@ async function fetchIsCommittee(accessToken, userId) {
     }
 }
 
+// ── PORTAL REDIRECT URL BUILDER ──────────────────────────────────────────
 // Build the full portal redirect URL preserving the current request URL,
 // INCLUDING query string (e.g. ?blok=A&search=123).
 function buildPortalRedirectUrl(currentUrl) {
@@ -245,6 +216,7 @@ function buildPortalRedirectUrl(currentUrl) {
     }
 }
 
+// ── GLOBAL LOGOUT ────────────────────────────────────────────────────────
 async function globalLogout(accessToken) {
     if (!accessToken) return;
     try {
@@ -264,6 +236,7 @@ async function globalLogout(accessToken) {
     }
 }
 
+// ── NAMESPACED PERMISSION CHECK ──────────────────────────────────────────
 async function checkNamespacedPermission(accessToken, userId, permission) {
     if (!userId || !accessToken) return false;
 
@@ -273,9 +246,7 @@ async function checkNamespacedPermission(accessToken, userId, permission) {
 
     const cacheKey = `${userId}:${permission}`;
     const cached = permissionCache.get(cacheKey);
-    if (cached && Date.now() < cached.expiresAt) {
-        return cached.hasPermission;
-    }
+    if (cached !== undefined) return cached;
 
     try {
         const client = getSupabaseUserClient(accessToken);
@@ -290,10 +261,7 @@ async function checkNamespacedPermission(accessToken, userId, permission) {
         }
 
         const hasPermission = data === true;
-        permissionCache.set(cacheKey, {
-            hasPermission,
-            expiresAt: Date.now() + CACHE_TTL_MS
-        });
+        permissionCache.set(cacheKey, hasPermission);
 
         return hasPermission;
     } catch (e) {
@@ -302,6 +270,7 @@ async function checkNamespacedPermission(accessToken, userId, permission) {
     }
 }
 
+// ── USER PROFILE ─────────────────────────────────────────────────────────
 async function fetchUserProfile(accessToken, userId) {
     if (!userId || !accessToken) return null;
 
@@ -315,9 +284,7 @@ async function fetchUserProfile(accessToken, userId) {
     }
 
     const cached = profileCache.get(userId);
-    if (cached && Date.now() < cached.expiresAt) {
-        return cached.profile;
-    }
+    if (cached) return cached;
 
     try {
         const client = getSupabaseUserClient(accessToken);
@@ -333,10 +300,7 @@ async function fetchUserProfile(accessToken, userId) {
         }
 
         if (data) {
-            profileCache.set(userId, {
-                profile: data,
-                expiresAt: Date.now() + CACHE_TTL_MS
-            });
+            profileCache.set(userId, data);
         }
 
         return data;
@@ -345,6 +309,8 @@ async function fetchUserProfile(accessToken, userId) {
         return null;
     }
 }
+
+// ── USER ROLES ───────────────────────────────────────────────────────────
 async function fetchUserRoles(accessToken, userId) {
     if (!userId || !accessToken) return [];
 
@@ -353,9 +319,7 @@ async function fetchUserRoles(accessToken, userId) {
     }
 
     const cached = rolesCache.get(userId);
-    if (cached && Date.now() < cached.expiresAt) {
-        return cached.roles;
-    }
+    if (cached) return cached;
 
     try {
         const client = getSupabaseUserClient(accessToken);
@@ -370,10 +334,7 @@ async function fetchUserRoles(accessToken, userId) {
         }
 
         const roles = data?.map(r => r.role) || [];
-        rolesCache.set(userId, {
-            roles,
-            expiresAt: Date.now() + CACHE_TTL_MS
-        });
+        rolesCache.set(userId, roles);
 
         return roles;
     } catch (e) {

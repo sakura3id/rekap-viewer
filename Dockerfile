@@ -38,11 +38,17 @@ ENV VITE_APP_VERSION=$VITE_APP_VERSION
 # Generate build-info at build time
 RUN node scripts/generate-build-info.js production
 
-# Final stage for app image
+# Final stage for app image — only copy what's needed
 FROM base
 
-# Copy built application
-COPY --from=build /app /app
+# Copy only production node_modules (no devDeps thanks to npm ci in production)
+COPY --from=build /app/node_modules /app/node_modules
+
+# Copy application source
+COPY --from=build /app/src /app/src
+COPY --from=build /app/public /app/public
+COPY --from=build /app/scripts /app/scripts
+COPY --from=build /app/package.json /app/package.json
 
 # Start the server directly to bypass prestart runtime regeneration
 EXPOSE 3000

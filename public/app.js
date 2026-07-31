@@ -941,8 +941,15 @@ async function fetchUser() {
       document.getElementById("user-email").textContent = user.email;
 
       if (user.avatar_url) {
-        document.getElementById("user-avatar-btn").innerHTML = `<img src="${user.avatar_url}" alt="Avatar" />`;
-        document.getElementById("user-avatar-large").innerHTML = `<img src="${user.avatar_url}" alt="Avatar" />`;
+        const avatarImg = document.createElement('img');
+        avatarImg.src = user.avatar_url;
+        avatarImg.alt = 'Avatar';
+        document.getElementById("user-avatar-btn").replaceChildren(avatarImg);
+
+        const avatarImgLarge = document.createElement('img');
+        avatarImgLarge.src = user.avatar_url;
+        avatarImgLarge.alt = 'Avatar';
+        document.getElementById("user-avatar-large").replaceChildren(avatarImgLarge);
       }
 
       const tagsContainer = document.getElementById("user-tags");
