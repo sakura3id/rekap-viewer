@@ -19,6 +19,32 @@ const SHEET_ID = process.env.SHEET_ID;
 const RANGE = process.env.RANGE || 'Import!A1:ZZ550';
 const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
+// ── CSRF PROTECTION ──────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+    'https://rekap.sr3.my.id',
+    'https://rekap.sakura3.id',
+    'https://rekap.veryresto.com',
+    'http://rekap.localtest.me:3000'
+];
+
+function csrfGuard(req, res, next) {
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+        const origin = req.get('Origin') || req.get('Referer');
+        if (!origin || !ALLOWED_ORIGINS.some(o => origin.startsWith(o))) {
+            return res.status(403).json({ error: 'CSRF validation failed' });
+        }
+    }
+    next();
+}
+
+// ── GLOBAL MIDDLEWARE ────────────────────────────────────────────────────
+
+// Parse JSON body with strict size limit (applied globally)
+app.use(express.json({ limit: '16kb' }));
+
+// CSRF guard on all state-mutating requests
+app.use(csrfGuard);
+
 // Middleware for migration redirects
 app.use((req, res, next) => {
     if (req.hostname === 'rekap.veryresto.com') {
@@ -38,9 +64,29 @@ app.use((req, res, next) => {
     next();
 });
 
-// Health check (Public)
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'OK', timestamp: new Date().toISOString(), region: process.env.FLY_REGION });
+// ── HEALTH CHECK (deep) ──────────────────────────────────────────────────
+app.get('/health', async (req, res) => {
+    try {
+        const cache = await readCache().catch(() => null);
+        const cacheOk = cache !== null;
+        const cacheAge = cache ? Math.floor((Date.now() - new Date(cache.updatedAt).getTime()) / 1000) : null;
+        // Unhealthy if cache is missing or older than 10 minutes
+        const healthy = cacheOk && cacheAge !== null && cacheAge < 600;
+
+        res.status(healthy ? 200 : 503).json({
+            status: healthy ? 'OK' : 'DEGRADED',
+            cache: { populated: cacheOk, ageSeconds: cacheAge },
+            region: process.env.FLY_REGION || 'local',
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        res.status(503).json({
+            status: 'ERROR',
+            error: error.message,
+            region: process.env.FLY_REGION || 'local',
+            timestamp: new Date().toISOString()
+        });
+    }
 });
 
 // Auth Denied Page (Public)
@@ -74,7 +120,7 @@ app.get('/api/me', requireAuth, requireApprovedResident, async (req, res) => {
     });
 });
 
-app.post('/api/analytics', express.json(), requireAuth, requireApprovedResident, async (req, res) => {
+app.post('/api/analytics', requireAuth, requireApprovedResident, async (req, res) => {
     const { eventName, properties } = req.body || {};
     if (eventName) {
         analytics.track(req.accessToken, req.user.id, eventName, properties).catch(err => {
@@ -161,6 +207,35 @@ async function refreshCache() {
     }
 }
 
+/**
+ * Strip the "Nama" column from sheet data for regular resident privacy.
+ * Pure function — no I/O, fully testable.
+ * @param {Object} sheetData - The Google Sheets data object with .values
+ * @returns {Object} Sheet data with "Nama" column removed
+ */
+function stripNameColumn(sheetData) {
+    if (!sheetData?.values || !Array.isArray(sheetData.values) || sheetData.values.length === 0) {
+        return sheetData;
+    }
+
+    const headerRow = sheetData.values[0];
+    const namaIdx = headerRow.findIndex(cell => typeof cell === 'string' && cell.trim() === 'Nama');
+
+    if (namaIdx === -1) return sheetData;
+
+    return {
+        ...sheetData,
+        values: sheetData.values.map(row => {
+            if (row.length > namaIdx) {
+                const newRow = [...row];
+                newRow.splice(namaIdx, 1);
+                return newRow;
+            }
+            return row;
+        })
+    };
+}
+
 // API endpoint serving from cache
 app.get('/api/rekap', requireAuth, requireApprovedResident, async (req, res) => {
     try {
@@ -186,38 +261,20 @@ app.get('/api/rekap', requireAuth, requireApprovedResident, async (req, res) => 
             return res.json(sheetData);
         }
 
-        // For regular residents, dynamically splice the "Nama" column from a shallow-cloned array
-        if (sheetData.values && Array.isArray(sheetData.values) && sheetData.values.length > 0) {
-            const headerRow = sheetData.values[0];
-            const namaIdx = headerRow.findIndex(cell => typeof cell === 'string' && cell.trim() === 'Nama');
-
-            if (namaIdx !== -1) {
-                const sanitizedValues = sheetData.values.map(row => {
-                    if (row.length > namaIdx) {
-                        const newRow = [...row];
-                        newRow.splice(namaIdx, 1); // Strip "Nama" column for regular resident privacy
-                        return newRow;
-                    }
-                    return row;
-                });
-                return res.json({
-                    ...sheetData,
-                    values: sanitizedValues
-                });
-            }
-        }
-
-        res.json(sheetData);
+        // For regular residents, strip the "Nama" column for privacy
+        return res.json(stripNameColumn(sheetData));
     } catch (error) {
         console.error('API Error:', error.message);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
 
-// Start background refresh
-setInterval(refreshCache, REFRESH_INTERVAL);
+// ── SERVER LIFECYCLE ─────────────────────────────────────────────────────
 
-app.listen(PORT, HOST, async () => {
+// Start background refresh (store reference for graceful shutdown)
+const refreshInterval = setInterval(refreshCache, REFRESH_INTERVAL);
+
+const server = app.listen(PORT, HOST, async () => {
     console.log(`--------------------------------------------------`);
     console.log(`Rekap Viewer Backend (Cached) is running!`);
     console.log(`Region: ${process.env.FLY_REGION || 'local'}`);
@@ -229,3 +286,21 @@ app.listen(PORT, HOST, async () => {
     console.log('Performing initial cache refresh...');
     await refreshCache();
 });
+
+// ── GRACEFUL SHUTDOWN ────────────────────────────────────────────────────
+function shutdown(signal) {
+    console.log(`[${signal}] Graceful shutdown initiated...`);
+    clearInterval(refreshInterval);
+    server.close(() => {
+        console.log('HTTP server closed.');
+        process.exit(0);
+    });
+    // Force exit if graceful close stalls after 10s
+    setTimeout(() => {
+        console.error('Forced shutdown after timeout.');
+        process.exit(1);
+    }, 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
